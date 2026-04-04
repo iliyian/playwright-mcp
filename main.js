@@ -116,6 +116,14 @@ app.post('/playwright', (req, res) => {
         return res.status(503).json({ error: 'MCP process not ready' });
     }
 
+    // 通知类消息没有 id，不需要等响应
+    if (reqId === undefined) {
+        const outPayload = JSON.stringify(parsed);
+        mcpChild.stdin.write(outPayload + '\n');
+        console.log(`[REQ:notification] --> 已转发 ${parsed.method}`);
+        return res.status(204).end();
+    }
+
     // 过滤掉注入的 dummy 参数
     if (parsed.method === 'tools/call' && parsed.params && parsed.params.arguments) {
         delete parsed.params.arguments.dummy;
