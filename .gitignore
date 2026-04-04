@@ -1,0 +1,5 @@
+node_modules/
+.env
+mcp.log
+.playwright-mcp/
+.claude/
