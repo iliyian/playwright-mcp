@@ -2,6 +2,30 @@ require('dotenv').config();
 const express = require('express');
 const { spawn } = require('child_process');
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+
+// ==========================================
+// 崩溃日志
+// ==========================================
+const CRASH_LOG = path.join(__dirname, 'crash.log');
+
+function logCrash(type, err) {
+    const ts = new Date().toISOString();
+    const msg = `[${ts}] ${type}: ${err.stack || err}\n`;
+    console.error(msg);
+    fs.appendFileSync(CRASH_LOG, msg);
+}
+
+process.on('uncaughtException', (err) => {
+    logCrash('uncaughtException', err);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    logCrash('unhandledRejection', reason);
+    process.exit(1);
+});
 
 const app = express();
 app.use(express.text({ type: '*/*', limit: '50mb' }));
@@ -22,7 +46,8 @@ const pendingRequests = new Map(); // id -> res
 function startMCP() {
     console.log('[MCP] 启动 bunx @playwright/mcp@latest ...');
     mcpChild = spawn('bunx', ['@playwright/mcp@latest', '--browser', 'chromium'], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, NODE_OPTIONS: '--unhandled-rejections=warn' }
     });
 
     mcpRL = readline.createInterface({ input: mcpChild.stdout });
@@ -96,6 +121,57 @@ app.use('/playwright', (req, res, next) => {
 });
 
 // ==========================================
+// 1小时无活动自动关闭所有页面
+// ==========================================
+const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1小时
+let lastActivityTime = Date.now();
+let idleTimer = null;
+let nextRequestId = 900000; // 内部请求用的 id，避免与外部冲突
+
+function resetIdleTimer() {
+    lastActivityTime = Date.now();
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(closeAllPagesOnIdle, IDLE_TIMEOUT_MS);
+}
+
+function closeAllPagesOnIdle() {
+    if (!mcpChild || mcpChild.killed) return;
+
+    const elapsed = Date.now() - lastActivityTime;
+    if (elapsed < IDLE_TIMEOUT_MS) {
+        // 有新活动，重新计时
+        idleTimer = setTimeout(closeAllPagesOnIdle, IDLE_TIMEOUT_MS - elapsed);
+        return;
+    }
+
+    console.log('[IDLE] 1小时无活动，自动关闭所有浏览器页面...');
+    const internalId = nextRequestId++;
+    const closeMsg = JSON.stringify({
+        jsonrpc: '2.0',
+        id: internalId,
+        method: 'tools/call',
+        params: { name: 'browser_close', arguments: { dummy: '' } }
+    });
+
+    // 注册一个内部响应处理器
+    pendingRequests.set(internalId, {
+        res: {
+            setHeader() {},
+            end(data) {
+                console.log(`[IDLE] 关闭页面完成: ${data.substring(0, 200)}`);
+            }
+        },
+        method: 'tools/call'
+    });
+
+    mcpChild.stdin.write(closeMsg + '\n');
+    console.log(`[IDLE] 已发送 browser_close 指令 (id: ${internalId})`);
+}
+
+// 启动时初始化计时器
+resetIdleTimer();
+
+// ==========================================
 // 代理请求到长驻 MCP 子进程
 // ==========================================
 app.post('/playwright', (req, res) => {
@@ -110,6 +186,9 @@ app.post('/playwright', (req, res) => {
 
     const reqId = parsed.id;
     console.log(`[REQ:${reqId}] <-- ${parsed.method} | 长度: ${payload.length}`);
+
+    // 更新活动时间，重置空闲计时器
+    resetIdleTimer();
 
     if (!mcpChild || mcpChild.killed) {
         console.log(`[REQ:${reqId}] MCP 子进程未就绪`);
