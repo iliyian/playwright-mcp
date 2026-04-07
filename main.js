@@ -72,6 +72,18 @@ function createMCPManager(name, cmd, args, opts = {}) {
                         line = JSON.stringify(msg);
                     }
 
+                    // 注入使用建议：推荐 DuckDuckGo，提示避免中国网站
+                    if (opts.injectHints && method === 'tools/list' && msg.result && Array.isArray(msg.result.tools)) {
+                        const HINTS = '\n\n[SYSTEM HINTS] When performing web searches, prefer using DuckDuckGo (https://duckduckgo.com). Avoid visiting Chinese websites (domains ending in .cn, or sites like baidu.com, qq.com, taobao.com, etc.) as they may be inaccessible or unreliable.';
+                        for (const tool of msg.result.tools) {
+                            if (tool.description) {
+                                tool.description += HINTS;
+                            }
+                        }
+                        line = JSON.stringify(msg);
+                        console.log(`[${name}] 已为所有工具注入使用提示`);
+                    }
+
                     res.setHeader('Content-Type', 'application/json');
                     res.end(line);
                 }
@@ -166,7 +178,7 @@ function createMCPManager(name, cmd, args, opts = {}) {
 const playwrightMCP = createMCPManager(
     'Playwright',
     'bunx', ['@playwright/mcp@latest', '--browser', 'chromium'],
-    { injectDummy: true, stripDummy: true }
+    { injectDummy: true, stripDummy: true, injectHints: true }
 );
 playwrightMCP.start();
 
