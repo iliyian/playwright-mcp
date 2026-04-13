@@ -187,6 +187,12 @@ const context7MCP = createMCPManager(
 );
 context7MCP.start();
 
+const timeMCP = createMCPManager(
+    'Time',
+    'uvx', ['mcp-server-time']
+);
+timeMCP.start();
+
 // ==========================================
 // 认证中间件
 // ==========================================
@@ -239,6 +245,10 @@ app.post('/context7', auth, (req, res) => {
     context7MCP.handle(req, res);
 });
 
+app.post('/time', auth, (req, res) => {
+    timeMCP.handle(req, res);
+});
+
 // ==========================================
 // 启动服务
 // ==========================================
@@ -249,5 +259,6 @@ app.listen(PORT, HOST, () => {
     console.log(`✅ 服务已启动`);
     console.log(`👉 Playwright: http://${HOST}:${PORT}/playwright`);
     console.log(`👉 Context7:   http://${HOST}:${PORT}/context7`);
+    console.log(`👉 Time:       http://${HOST}:${PORT}/time`);
     console.log(`🔑 请在请求头中添加: Authorization: Bearer <AUTH_TOKEN>`);
 });
